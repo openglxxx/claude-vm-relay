@@ -1,0 +1,39 @@
+name: Claude Code 2.1.309 linux relay
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download
+        run: |
+          set -euo pipefail
+          mkdir -p dl
+          curl -fSL --retry 5 --retry-delay 5 -o dl/claude.zst "https://downloads.claude.ai/claude-code-releases/2.1.309/linux-x64/claude.zst"
+          ls -l dl/claude.zst
+
+      - name: Verify
+        run: |
+          set -euo pipefail
+          cd dl
+          echo "e52289b95def16148c8d0a48b1ccc0d357429e73473a9a20ac0638fb7460a59b  claude.zst" | sha256sum -c -
+          test "$(stat -c%s claude.zst)" = "103411745"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="claude-code-2.1.309-linux"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+            --title "Claude Code 2.1.309 linux-x64" \
+            --notes "Official Claude Code 2.1.309 linux-x64 claude.zst, relayed unmodified from downloads.claude.ai. sha256 e52289b95def16148c8d0a48b1ccc0d357429e73473a9a20ac0638fb7460a59b" \
+            || echo "release exists"
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber dl/claude.zst
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "\(.name)  \(.size)"'
