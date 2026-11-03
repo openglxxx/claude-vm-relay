@@ -1,0 +1,61 @@
+name: Claude VM bundle relay 072b6cbf
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  VM_SHA: 072b6cbfe74f428a98bd86035f83b322b369d1f1
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Download from Anthropic CDN
+        run: |
+          set -euo pipefail
+          mkdir -p dl
+          base="https://downloads.claude.ai/vms/linux/x64/${VM_SHA}"
+          curl -fSL --retry 5 --retry-delay 5 -o dl/rootfs.vhdx.zst "$base/rootfs.vhdx.zst"
+          curl -fSL --retry 5 --retry-delay 5 -o dl/vmlinuz.zst "$base/vmlinuz.zst"
+          curl -fSL --retry 5 --retry-delay 5 -o dl/initrd.zst "$base/initrd.zst"
+          ls -l dl
+
+      - name: Verify checksums
+        run: |
+          set -euo pipefail
+          cd dl
+          echo "c480f8a62d0d9be20e1a1ee31b9f25c73097f793127dcefa90b0c59ada0e12ad  rootfs.vhdx.zst" | sha256sum -c -
+          echo "3118616ef6ba3866652284b8b4c224a96876c56091724c35c93caf1ccb9b50a9  vmlinuz.zst" | sha256sum -c -
+          echo "e3c5ce2b8e9e9adf67de7ec83cafa4a0c65fab8a22036a6b53f03c9765b3342a  initrd.zst" | sha256sum -c -
+
+      - name: Split rootfs into chunks
+        run: |
+          set -euo pipefail
+          cd dl
+          split -b 94371840 -d -a 2 rootfs.vhdx.zst rootfs.part-
+          ls -l rootfs.part-* | head -20
+          : > SHA256SUMS.txt
+          for f in rootfs.part-* vmlinuz.zst initrd.zst; do
+            sha256sum "$f" >> SHA256SUMS.txt
+          done
+          cp SHA256SUMS.txt ../SHA256SUMS.txt
+          wc -l ../SHA256SUMS.txt
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="claude-vm-072b6cb"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+            --title "Claude Cowork VM bundle 072b6cb" \
+            --notes "Official Claude Cowork VM components for win32-x64, relayed unmodified from downloads.claude.ai. Verify with SHA256SUMS.txt." \
+            || echo "release already exists, uploading to it"
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber \
+            dl/rootfs.part-* dl/vmlinuz.zst dl/initrd.zst SHA256SUMS.txt
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[] | "\(.name)  \(.size)"'
